@@ -1,127 +1,97 @@
 import mongoose from 'mongoose';
 import bcrypt from 'bcryptjs';
 import dotenv from 'dotenv';
+import { readFile } from 'node:fs/promises';
+import { fileURLToPath } from 'node:url';
+import path from 'node:path';
 import User from '../models/User.js';
 import Book from '../models/Book.js';
 import Ticket from '../models/Ticket.js';
 
 dotenv.config();
-
 const MONGO_URI = process.env.MONGO_URI || 'mongodb://localhost:27017/bookleaf-support';
+const here = path.dirname(fileURLToPath(import.meta.url));
+const datasetPath = path.resolve(here, '../data/bookleaf_sample_data.json');
 
 const seedDatabase = async () => {
   try {
+    const raw = JSON.parse(await readFile(datasetPath, 'utf8'));
+    if (!Array.isArray(raw.authors) || raw.authors.length !== 10 || raw.authors.reduce((n, a) => n + (a.books?.length || 0), 0) !== 18) {
+      throw new Error('Official dataset must contain exactly 10 authors and 18 books.');
+    }
     await mongoose.connect(MONGO_URI);
-    console.log('Connected to MongoDB for seeding...');
+    console.log('Connected to MongoDB for seeding.');
+    console.warn('Seeding clears existing users, books, and tickets in the configured database. Use a disposable development database.');
+    await Promise.all([User.deleteMany({}), Book.deleteMany({}), Ticket.deleteMany({})]);
 
-    // Clear existing data
-    await User.deleteMany({});
-    await Book.deleteMany({});
-    await Ticket.deleteMany({});
-    console.log('Cleared existing database collections.');
-
-    // 1. Create Admin User
-    const hashedAdminPassword = await bcrypt.hash('admin123', 10);
-    const adminUser = await User.create({
-      name: 'BookLeaf Admin',
-      email: 'admin@bookleaf.com',
-      password: hashedAdminPassword,
-      role: 'admin'
+    const adminPassword = process.env.SEED_ADMIN_PASSWORD || 'admin123';
+    const authorPassword = process.env.SEED_AUTHOR_PASSWORD || 'password123';
+    await User.create({
+      name: 'BookLeaf Admin', email: 'admin@bookleaf.com',
+      password: await bcrypt.hash(adminPassword, 12), role: 'admin'
     });
-    console.log('Created admin user: admin@bookleaf.com / admin123');
 
-    // 2. Create Sample Author Users & Books (Simulating bookleaf_sample_data.json structure)
-    const hashedPassword = await bcrypt.hash('password123', 10);
-
-    const authorsData = [
-      {
-        name: 'Aarav Sharma',
-        email: 'aarav@example.com',
-        books: [
-          {
-            title: 'Whispers of the Ganges',
-            isbn: '978-81-987654-1-0',
-            genre: 'Fiction',
-            publicationDate: new Date('2025-01-15'),
-            status: 'Published & Live',
-            mrp: 499,
-            totalCopiesSold: 320,
-            totalRoyaltyEarned: 12760,
-            royaltyPaid: 10000,
-            royaltyPending: 2760
-          },
-          {
-            title: 'Delhi Traffic Blues',
-            isbn: '978-81-987654-1-1',
-            genre: 'Humor',
-            publicationDate: new Date('2025-06-10'),
-            status: 'Published & Live',
-            mrp: 350,
-            totalCopiesSold: 150,
-            totalRoyaltyEarned: 4200,
-            royaltyPaid: 0,
-            royaltyPending: 4200
-          }
-        ]
-      },
-      {
-        name: 'Priya Patel',
-        email: 'priya@example.com',
-        books: [
-          {
-            title: 'Startup Silicon Valley & Chai',
-            isbn: '978-1-68492-332-1',
-            genre: 'Business',
-            publicationDate: new Date('2024-11-20'),
-            status: 'Published & Live',
-            mrp: 799,
-            totalCopiesSold: 840,
-            totalRoyaltyEarned: 42000,
-            royaltyPaid: 42000,
-            royaltyPending: 0
-          }
-        ]
-      }
-    ];
-
-    for (const authorInfo of authorsData) {
-      const authorUser = await User.create({
-        name: authorInfo.name,
-        email: authorInfo.email,
-        password: hashedPassword,
-        role: 'author'
+    const authorHash = await bcrypt.hash(authorPassword, 12);
+    const seededAuthors = new Map();
+    for (const author of raw.authors) {
+      const user = await User.create({
+        name: author.name,
+        email: author.email,
+        password: authorHash,
+        role: 'author',
+        phone: author.phone || '',
+        city: author.city || '',
+        joinedDate: author.joined_date ? new Date(author.joined_date) : null
       });
-
-      for (const bookInfo of authorInfo.books) {
+      seededAuthors.set(author.author_id, user);
+      for (const book of author.books || []) {
         await Book.create({
-          ...bookInfo,
-          authorId: authorUser._id
+          authorId: user._id,
+          sourceBookId: book.book_id,
+          title: book.title,
+          isbn: book.isbn,
+          genre: book.genre,
+          publicationDate: book.publication_date ? new Date(book.publication_date) : null,
+          status: book.status,
+          mrp: book.mrp ?? null,
+          authorRoyaltyPerCopy: book.author_royalty_per_copy ?? null,
+          totalCopiesSold: book.total_copies_sold ?? 0,
+          totalRoyaltyEarned: book.total_royalty_earned ?? 0,
+          royaltyPaid: book.royalty_paid ?? 0,
+          royaltyPending: book.royalty_pending ?? 0,
+          lastRoyaltyPayoutDate: book.last_royalty_payout_date ? new Date(book.last_royalty_payout_date) : null,
+          printPartner: book.print_partner ?? null,
+          availableOn: book.available_on ?? []
         });
       }
-      console.log(`Seeded author: ${authorInfo.name} with books.`);
+      console.log(`Seeded ${author.author_id}: ${author.name} (${author.books.length} books).`);
     }
 
-    // 3. Create Sample Support Ticket to test AI features out-of-the-box
-    const sampleAuthor = await User.findOne({ email: 'aarav@example.com' });
-    const sampleBook = await Book.findOne({ title: 'Whispers of the Ganges' });
-
-    if (sampleAuthor && sampleBook) {
+    // A demo ticket ensures the admin workflow is testable immediately after seeding.
+    const demoAuthor = seededAuthors.get('AUTH001');
+    const demoBook = await Book.findOne({ sourceBookId: 'BK001' });
+    if (demoAuthor && demoBook) {
       await Ticket.create({
-        authorId: sampleAuthor._id,
-        bookId: sampleBook._id,
-        subject: 'Royalty payout delayed for Q3',
-        description: 'I published my book 4 months ago and still have not received my royalty payout over the threshold. Please check what is going on.',
+        authorId: demoAuthor._id,
+        bookId: demoBook._id,
+        subject: 'Royalty payout question',
+        description: 'Could you explain my pending royalty balance and when it is expected to be paid?',
         category: 'Royalty & Payments',
-        priority: 'High',
+        priority: 'Medium',
         status: 'Open'
       });
-      console.log('Created sample support ticket.');
     }
 
-    console.log('Database seeding completed successfully!');
+    const authorCount = await User.countDocuments({ role: 'author' });
+    const bookCount = await Book.countDocuments();
+    console.log(`Seed complete: ${authorCount} authors, ${bookCount} books, 1 admin.`);
+    console.log(`Admin login: admin@bookleaf.com / ${adminPassword}`);
+    console.log(`Author login: ${raw.authors[0].email} / ${authorPassword}`);
+    await mongoose.disconnect();
     process.exit(0);
   } catch (error) {
-    console.error('Error seeding database:', error);
+    console.error('Database seeding failed:', error);
+    try { await mongoose.disconnect(); } catch {}
     process.exit(1);
   }
 };

@@ -12,7 +12,7 @@ export default function AuthorDashboard({ token, user, onLogout }) {
   const [loading, setLoading] = useState(true);
 
   const api = axios.create({
-    baseURL: 'http://localhost:5000/api',
+    baseURL: import.meta.env.VITE_API_BASE_URL || 'http://localhost:5000/api',
     headers: { Authorization: `Bearer ${token}` }
   });
 
@@ -33,7 +33,16 @@ export default function AuthorDashboard({ token, user, onLogout }) {
 
   useEffect(() => {
     fetchData();
-  }, []);
+    // Near-real-time ticket updates without requiring a manual refresh.
+    const timer = window.setInterval(async () => {
+      try {
+        const res = await api.get('/tickets');
+        setTickets(res.data);
+        setActiveTicket(current => current ? (res.data.find(t => t._id === current._id) || current) : current);
+      } catch (err) { console.error('Ticket refresh failed:', err); }
+    }, 5000);
+    return () => window.clearInterval(timer);
+  }, [token]);
 
   const handleCreateTicket = async (e) => {
     e.preventDefault();
@@ -90,13 +99,15 @@ export default function AuthorDashboard({ token, user, onLogout }) {
         <section>
           <h2 className="text-lg font-bold text-gray-800 mb-4">My Published Books & Royalties</h2>
           <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+            {books.length === 0 && <p className="text-sm text-gray-500">No books are associated with this account yet.</p>}
             {books.map((book) => (
               <div key={book._id} className="bg-white p-5 rounded-lg shadow border border-gray-200">
                 <div className="flex justify-between items-start mb-2">
                   <h3 className="font-bold text-indigo-900">{book.title}</h3>
                   <span className="text-xs bg-green-100 text-green-800 px-2 py-1 rounded font-medium">{book.status}</span>
                 </div>
-                <p className="text-xs text-gray-500 mb-4">ISBN: {book.isbn} | Genre: {book.genre}</p>
+                <p className="text-xs text-gray-500 mb-1">ISBN: {book.isbn} | Genre: {book.genre}</p>
+                <p className="text-xs text-gray-500 mb-4">MRP: ₹{book.mrp} | Published: {book.publicationDate ? new Date(book.publicationDate).toLocaleDateString() : 'Not published yet'}</p>
                 <div className="grid grid-cols-3 gap-2 bg-gray-50 p-3 rounded text-center text-xs">
                   <div>
                     <span className="block text-gray-400">Copies Sold</span>
@@ -107,8 +118,8 @@ export default function AuthorDashboard({ token, user, onLogout }) {
                     <span className="font-bold text-gray-700">₹{book.totalRoyaltyEarned}</span>
                   </div>
                   <div>
-                    <span className="block text-gray-400">Pending Payout</span>
-                    <span className="font-bold text-indigo-600">₹{book.royaltyPending}</span>
+                    <span className="block text-gray-400">Paid / Pending</span>
+                    <span className="font-bold text-indigo-600">₹{book.royaltyPaid} / ₹{book.royaltyPending}</span>
                   </div>
                 </div>
               </div>
@@ -152,6 +163,11 @@ export default function AuthorDashboard({ token, user, onLogout }) {
                   className="w-full border border-gray-300 rounded p-2 text-sm" 
                   required 
                 />
+              </div>
+              <div>
+                <label className="block text-xs font-medium text-gray-700 mb-1">Attachment (optional, UI only)</label>
+                <input type="file" className="w-full text-xs" aria-label="Optional attachment (not uploaded)" />
+                <p className="text-[10px] text-gray-400 mt-1">File selection is a UI placeholder; files are not uploaded.</p>
               </div>
               <button type="submit" className="w-full bg-indigo-600 text-white font-semibold py-2 rounded text-sm hover:bg-indigo-700">
                 Submit Ticket

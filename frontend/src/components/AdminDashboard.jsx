@@ -9,15 +9,25 @@ export default function AdminDashboard({ token, user, onLogout }) {
   const [aiDraft, setAiDraft] = useState('');
   const [loadingDraft, setLoadingDraft] = useState(false);
   const [filterStatus, setFilterStatus] = useState('');
+  const [filterCategory, setFilterCategory] = useState('');
+  const [filterPriority, setFilterPriority] = useState('');
+  const [filterFrom, setFilterFrom] = useState('');
+  const [filterTo, setFilterTo] = useState('');
 
   const api = axios.create({
-    baseURL: 'http://localhost:5000/api',
+    baseURL: import.meta.env.VITE_API_BASE_URL || 'http://localhost:5000/api',
     headers: { Authorization: `Bearer ${token}` }
   });
 
   const fetchTickets = async () => {
     try {
-      const url = filterStatus ? `/tickets?status=${filterStatus}` : '/tickets';
+      const params = new URLSearchParams();
+      if (filterStatus) params.set('status', filterStatus);
+      if (filterCategory) params.set('category', filterCategory);
+      if (filterPriority) params.set('priority', filterPriority);
+      if (filterFrom) params.set('from', filterFrom);
+      if (filterTo) params.set('to', `${filterTo}T23:59:59.999Z`);
+      const url = params.toString() ? `/tickets?${params.toString()}` : '/tickets';
       const res = await api.get(url);
       setTickets(res.data);
     } catch (err) {
@@ -27,7 +37,7 @@ export default function AdminDashboard({ token, user, onLogout }) {
 
   useEffect(() => {
     fetchTickets();
-  }, [filterStatus]);
+  }, [filterStatus, filterCategory, filterPriority, filterFrom, filterTo]);
 
   const handleGenerateAiDraft = async () => {
     if (!activeTicket) return;
@@ -69,6 +79,19 @@ export default function AdminDashboard({ token, user, onLogout }) {
     }
   };
 
+  const handleTicketFieldChange = async (field, value) => {
+    try {
+      const res = await api.patch(`/tickets/${activeTicket._id}`, { [field]: value });
+      setActiveTicket(res.data);
+      fetchTickets();
+    } catch (err) { alert(err.response?.data?.error || 'Failed to update ticket.'); }
+  };
+
+  const handleAssignToMe = async () => {
+    try { const res = await api.patch(`/tickets/${activeTicket._id}`, { assignToMe: true }); setActiveTicket(res.data); fetchTickets(); }
+    catch (err) { alert(err.response?.data?.error || 'Failed to assign ticket.'); }
+  };
+
   const handleStatusChange = async (newStatus) => {
     try {
       const res = await api.patch(`/tickets/${activeTicket._id}`, { status: newStatus });
@@ -100,6 +123,16 @@ export default function AdminDashboard({ token, user, onLogout }) {
         <div className="bg-white rounded-lg shadow border border-gray-200 p-4 flex flex-col h-[700px]">
           <div className="flex justify-between items-center mb-4">
             <h2 className="font-bold text-gray-800 text-sm">Master Ticket Queue</h2>
+            <div className="flex flex-wrap gap-2">
+            <select aria-label="Filter by category" value={filterCategory} onChange={(e) => setFilterCategory(e.target.value)} className="text-xs border rounded p-1">
+              <option value="">All Categories</option>
+              {['Royalty & Payments','ISBN & Metadata Issues','Printing & Quality','Distribution & Availability','Book Status & Production Updates','General Inquiry'].map(v => <option key={v} value={v}>{v}</option>)}
+            </select>
+            <select aria-label="Filter by priority" value={filterPriority} onChange={(e) => setFilterPriority(e.target.value)} className="text-xs border rounded p-1">
+              <option value="">All Priorities</option><option>Critical</option><option>High</option><option>Medium</option><option>Low</option>
+            </select>
+            <input aria-label="Filter tickets from date" type="date" value={filterFrom} onChange={(e) => setFilterFrom(e.target.value)} className="text-xs border rounded p-1" />
+            <input aria-label="Filter tickets to date" type="date" value={filterTo} onChange={(e) => setFilterTo(e.target.value)} min={filterFrom || undefined} className="text-xs border rounded p-1" />
             <select 
               value={filterStatus} 
               onChange={(e) => setFilterStatus(e.target.value)}
@@ -109,7 +142,9 @@ export default function AdminDashboard({ token, user, onLogout }) {
               <option value="Open">Open</option>
               <option value="In Progress">In Progress</option>
               <option value="Resolved">Resolved</option>
+              <option value="Closed">Closed</option>
             </select>
+            </div>
           </div>
 
           <div className="overflow-y-auto flex-1 space-y-2">
@@ -145,7 +180,14 @@ export default function AdminDashboard({ token, user, onLogout }) {
                   <h3 className="font-bold text-base text-gray-900">{activeTicket.subject}</h3>
                   <p className="text-xs text-gray-500">Author: {activeTicket.authorId?.name} ({activeTicket.authorId?.email})</p>
                 </div>
-                <div className="flex items-center gap-2">
+                <div className="flex flex-wrap items-center gap-2">
+                  <button onClick={handleAssignToMe} className="text-xs border rounded px-2 py-1">Assign to me</button>
+                  <select aria-label="Override category" value={activeTicket.category} onChange={(e) => handleTicketFieldChange('category', e.target.value)} className="text-xs border rounded p-1">
+                    {['Royalty & Payments','ISBN & Metadata Issues','Printing & Quality','Distribution & Availability','Book Status & Production Updates','General Inquiry'].map(v => <option key={v} value={v}>{v}</option>)}
+                  </select>
+                  <select aria-label="Override priority" value={activeTicket.priority} onChange={(e) => handleTicketFieldChange('priority', e.target.value)} className="text-xs border rounded p-1">
+                    {['Critical','High','Medium','Low'].map(v => <option key={v} value={v}>{v}</option>)}
+                  </select>
                   <select 
                     value={activeTicket.status} 
                     onChange={(e) => handleStatusChange(e.target.value)}
@@ -190,11 +232,11 @@ export default function AdminDashboard({ token, user, onLogout }) {
                     </div>
 
                     <form onSubmit={handleSendReply} className="flex gap-2">
-                      <input 
-                        type="text" 
+                      <textarea 
+                        rows={2} 
                         value={replyContent} 
                         onChange={(e) => setReplyContent(e.target.value)} 
-                        placeholder="Type official reply..." 
+                        placeholder="Type or edit official reply..." 
                         className="flex-1 border border-gray-300 rounded p-2 text-sm" 
                         required 
                       />

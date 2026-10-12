@@ -12,7 +12,7 @@ export default function Login({ onLoginSuccess }) {
     e.preventDefault();
     setError('');
     try {
-      const endpoint = isLogin ? 'http://localhost:5000/api/auth/login' : 'http://localhost:5000/api/auth/register';
+      const endpoint = isLogin ? `${import.meta.env.VITE_API_BASE_URL || 'http://localhost:5000/api'}/auth/login` : `${import.meta.env.VITE_API_BASE_URL || 'http://localhost:5000/api'}/auth/register`;
       const payload = isLogin ? { email, password } : { name, email, password, role: 'author' };
 
       const res = await axios.post(endpoint, payload);
@@ -87,10 +87,10 @@ export default function Login({ onLoginSuccess }) {
           </button>
         </div>
 
-        <div className="mt-6 border-t pt-4 text-xs text-gray-400 text-center">
+        {/* <div className="mt-6 border-t pt-4 text-xs text-gray-400 text-center">
           <p>Demo Admin: admin@bookleaf.com / admin123</p>
           <p>Demo Author: aarav@example.com / password123</p>
-        </div>
+        </div> */}
       </div>
     </div>
   );
